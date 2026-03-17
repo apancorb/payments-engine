@@ -28,6 +28,7 @@ pub struct StoredTransaction {
     pub client: u16,
     pub amount: Decimal,
     pub disputed: bool,
+    pub chargebacked: bool,
 }
 
 /// A client's account state.

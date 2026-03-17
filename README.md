@@ -32,6 +32,41 @@ The CSV is read record-by-record using a `BufReader`, so memory usage stays cons
 - Invalid operations (insufficient funds, duplicate tx IDs, disputes on nonexistent transactions, client ID mismatches) are silently ignored per the specification.
 - The `run()` function returns `Result` for clean propagation of I/O errors.
 
+## Correctness
+
+Correctness is ensured through three complementary strategies:
+
+### 1. Type System Guarantees
+
+- **`rust_decimal::Decimal`** eliminates floating-point rounding errors entirely. Financial amounts are stored as exact decimal values, not IEEE 754 floats. For example, `0.1 + 0.2 == 0.3` holds true with `Decimal` but fails with `f64`.
+- **`TransactionType` enum** with `#[serde(rename_all = "lowercase")]` means invalid transaction types are rejected at deserialization — not checked with string comparisons.
+- **`Option<Decimal>` for amount** encodes in the type system that disputes/resolves/chargebacks don't carry amounts, while deposits/withdrawals do.
+- **`u16` for client IDs and `u32` for tx IDs** match the spec exactly — overflow is impossible for valid inputs.
+
+### 2. State Machine for Disputes
+
+Each stored transaction tracks its dispute lifecycle via two booleans: `disputed` and `chargebacked`. The valid state transitions are:
+
+```
+                  dispute          resolve
+  [normal] ──────────────► [disputed] ──────────────► [normal]
+                               │
+                               │ chargeback
+                               ▼
+                          [chargebacked] (final — no further disputes allowed)
+```
+
+The guards in each handler enforce these transitions:
+- `dispute`: requires `!disputed && !chargebacked`
+- `resolve`: requires `disputed`
+- `chargeback`: requires `disputed`, then sets `chargebacked = true`
+
+This prevents double-disputes, resolving non-disputed transactions, and re-disputing after a chargeback (which the spec calls "the final state").
+
+### 3. Comprehensive Unit Tests (24 tests)
+
+Every transaction type and edge case has a dedicated test that asserts exact `Decimal` values for `available`, `held`, and `total`. Tests are co-located in `engine.rs` with the logic they verify, making it easy to see what each function is supposed to do.
+
 ## Assumptions
 
 - **Locked accounts** reject all new deposits and withdrawals (banking convention — a frozen account cannot transact).
@@ -42,11 +77,14 @@ The CSV is read record-by-record using a `BufReader`, so memory usage stays cons
 
 ## Testing
 
-### Unit Tests (18 tests in `engine.rs`)
+### Unit Tests (24 tests in `engine.rs`)
 
 Cover every transaction type and edge case:
-- Deposit/withdrawal basics (single, multiple, exact balance, insufficient funds)
+- Deposit/withdrawal basics (single, multiple, exact balance, insufficient funds, zero amount, no prior deposit)
 - Full dispute lifecycle (dispute → resolve, dispute → chargeback)
+- Re-dispute after resolve (allowed), re-dispute after chargeback (rejected — final state)
+- Double dispute on same tx (ignored)
+- Multiple disputes on different txs for the same client
 - Edge cases: nonexistent tx, non-disputed tx, wrong client ID, locked accounts, duplicate tx IDs
 - Precision with 4 decimal places
 - Negative available balance from disputed partial withdrawal

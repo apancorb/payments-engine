@@ -63,6 +63,7 @@ impl PaymentsEngine {
                 client,
                 amount,
                 disputed: false,
+                chargebacked: false,
             },
         );
     }
@@ -92,7 +93,7 @@ impl PaymentsEngine {
 
     fn dispute(&mut self, client: u16, tx: u32) {
         let stored = match self.transactions.get_mut(&tx) {
-            Some(t) if t.client == client && !t.disputed => t,
+            Some(t) if t.client == client && !t.disputed && !t.chargebacked => t,
             _ => return,
         };
 
@@ -125,6 +126,7 @@ impl PaymentsEngine {
         };
 
         stored.disputed = false;
+        stored.chargebacked = true;
         let amount = stored.amount;
 
         let account = self.get_or_create_account(client);
@@ -395,6 +397,84 @@ mod tests {
         assert_eq!(account.available, dec!(-7.0));
         assert_eq!(account.held, dec!(10.0));
         assert_eq!(account.total(), dec!(3.0));
+    }
+
+    #[test]
+    fn test_double_dispute_same_tx() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(deposit_record(1, 1, dec!(10.0)));
+        engine.process(dispute_record(1, 1));
+        // Second dispute on already-disputed tx should be ignored
+        engine.process(dispute_record(1, 1));
+
+        let account = get_account(&engine, 1);
+        assert_eq!(account.available, dec!(0));
+        assert_eq!(account.held, dec!(10.0));
+        assert_eq!(account.total(), dec!(10.0));
+    }
+
+    #[test]
+    fn test_resolve_then_re_dispute() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(deposit_record(1, 1, dec!(10.0)));
+        engine.process(dispute_record(1, 1));
+        engine.process(resolve_record(1, 1));
+        // After resolve, should be able to dispute again
+        engine.process(dispute_record(1, 1));
+
+        let account = get_account(&engine, 1);
+        assert_eq!(account.available, dec!(0));
+        assert_eq!(account.held, dec!(10.0));
+        assert_eq!(account.total(), dec!(10.0));
+    }
+
+    #[test]
+    fn test_chargeback_prevents_re_dispute() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(deposit_record(1, 1, dec!(10.0)));
+        engine.process(deposit_record(1, 2, dec!(5.0)));
+        engine.process(dispute_record(1, 1));
+        engine.process(chargeback_record(1, 1));
+        // Chargeback is the final state — re-dispute must be rejected
+        engine.process(dispute_record(1, 1));
+
+        let account = get_account(&engine, 1);
+        // available=5 (from tx2), held=0 (chargeback removed held), total=5
+        assert_eq!(account.available, dec!(5.0));
+        assert_eq!(account.held, dec!(0));
+        assert_eq!(account.total(), dec!(5.0));
+        assert!(account.locked);
+    }
+
+    #[test]
+    fn test_multiple_disputes_different_txs() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(deposit_record(1, 1, dec!(10.0)));
+        engine.process(deposit_record(1, 2, dec!(20.0)));
+        engine.process(dispute_record(1, 1));
+        engine.process(dispute_record(1, 2));
+
+        let account = get_account(&engine, 1);
+        assert_eq!(account.available, dec!(0));
+        assert_eq!(account.held, dec!(30.0));
+        assert_eq!(account.total(), dec!(30.0));
+    }
+
+    #[test]
+    fn test_deposit_zero_amount_ignored() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(deposit_record(1, 1, dec!(0.0)));
+
+        assert!(engine.accounts.get(&1).is_none());
+    }
+
+    #[test]
+    fn test_withdrawal_without_prior_deposit() {
+        let mut engine = PaymentsEngine::new();
+        engine.process(withdrawal_record(1, 1, dec!(10.0)));
+
+        let account = get_account(&engine, 1);
+        assert_eq!(account.available, dec!(0));
     }
 
     #[test]
