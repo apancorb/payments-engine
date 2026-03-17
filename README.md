@@ -67,6 +67,35 @@ This prevents double-disputes, resolving non-disputed transactions, and re-dispu
 
 Every transaction type and edge case has a dedicated test that asserts exact `Decimal` values for `available`, `held`, and `total`. Tests are co-located in `engine.rs` with the logic they verify, making it easy to see what each function is supposed to do.
 
+## Safety & Robustness
+
+### No `unsafe` Code
+
+The entire codebase uses safe Rust. No `unsafe` blocks, no raw pointers, no `unwrap()` on user-derived data. Rust's ownership system guarantees memory safety and prevents data races at compile time.
+
+### No `unwrap()` / `expect()` on External Input
+
+All external data flows through fallible APIs:
+- **CSV parsing**: `csv_reader.deserialize()` returns `Result` — malformed rows are logged to stderr and skipped, never panicking. A single bad row doesn't halt processing of the remaining file.
+- **File I/O**: `File::open()` and all `writeln!()` calls propagate errors via `?` to `run()`, which returns `Result<(), Box<dyn std::error::Error>>`.
+- **Amount field**: `Option<Decimal>` — if a deposit/withdrawal is missing an amount, the `None` case is handled and the transaction is skipped.
+
+### Invalid Amounts
+
+Deposits and withdrawals with zero or negative amounts are rejected (line 44: `a > Decimal::ZERO`). This prevents a malicious actor from depositing negative amounts to drain an account.
+
+### Locked Account Enforcement
+
+Once a chargeback locks an account, both `deposit()` and `withdrawal()` check `account.locked` and return early. There's no code path that can bypass this — the check happens before any balance modification.
+
+### No Panics in the Engine
+
+The `PaymentsEngine::process()` method never panics. Every handler uses `match` with a catch-all `_ => return` for invalid states. The engine is designed to be resilient to malformed or adversarial input — it simply ignores what it can't process.
+
+### Errors Go to stderr, Output Goes to stdout
+
+Errors and warnings are written to stderr (`eprintln!`), while the CSV output goes to stdout. This means `cargo run -- input.csv > output.csv` captures only clean output — error messages don't corrupt the CSV.
+
 ## Assumptions
 
 - **Locked accounts** reject all new deposits and withdrawals (banking convention — a frozen account cannot transact).
