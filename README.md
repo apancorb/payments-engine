@@ -96,6 +96,42 @@ The `PaymentsEngine::process()` method never panics. Every handler uses `match` 
 
 Errors and warnings are written to stderr (`eprintln!`), while the CSV output goes to stdout. This means `cargo run -- input.csv > output.csv` captures only clean output — error messages don't corrupt the CSV.
 
+## Efficiency
+
+### What's Streaming
+
+CSV input is read **record-by-record** via `BufReader` — no upfront loading. Each `InputRecord` is deserialized, processed, then dropped. The input file size has zero impact on memory usage from the reading side.
+
+Output is written directly to a locked `stdout` handle — no intermediate `String` buffer.
+
+### Memory Profile
+
+There are two data structures in memory:
+
+| Structure | Key | Value Size | Max Entries | Worst Case |
+|---|---|---|---|---|
+| `accounts` | `u16` | ~33 bytes (2 Decimals + bool) | 65,535 | **~5 MB** |
+| `transactions` | `u32` | ~24 bytes (u16 + Decimal + 2 bools) | up to 4.3B | **~240 GB** |
+
+**Accounts** are bounded by `u16` — at most 65,535 clients, ~5 MB total. This is negligible.
+
+**Transactions** are the bottleneck. We must store deposits for dispute/resolve/chargeback lookups (the spec requires referencing past transactions by ID). With tx IDs as `u32`, the theoretical worst case is ~4.3 billion deposits at ~60 bytes each (value + key + HashMap overhead) = ~240 GB.
+
+### Trade-offs Made
+
+- **Withdrawals are not stored** — they can't be disputed, so we skip them entirely. This cuts the transaction map size significantly in practice.
+- **Chargebacked transactions stay in the map** — we need the `chargebacked` flag to prevent re-disputes. The cost is a few extra bytes per chargebacked tx vs. removing them entirely.
+- **No disk-backed store** — for a toy engine, the in-memory HashMap is the right trade-off between simplicity and performance. A production system with billions of transactions would use a persistent store (e.g., RocksDB or PostgreSQL).
+
+### If Bundled in a Server (Thousands of Concurrent TCP Streams)
+
+The engine is designed for easy adaptation:
+
+1. **`PaymentsEngine::process()` takes a single record** — it doesn't own the reader. You can feed it records from any source (TCP stream, Kafka consumer, etc.) without changing the engine.
+2. **No global state** — all state is inside the `PaymentsEngine` struct. You could run one engine per client (sharded by `client_id`) or wrap a shared engine in `Arc<Mutex<PaymentsEngine>>`.
+3. **Per-client sharding** would be the natural scaling strategy: since disputes/resolves/chargebacks only reference transactions within the same client, each shard is independent. This eliminates lock contention across clients.
+4. **The `csv` crate's reader accepts any `impl Read`** — swapping `BufReader<File>` for `BufReader<TcpStream>` requires changing one line.
+
 ## Assumptions
 
 - **Locked accounts** reject all new deposits and withdrawals (banking convention — a frozen account cannot transact).
