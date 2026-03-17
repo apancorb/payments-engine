@@ -67,3 +67,13 @@ Run all tests:
 ```sh
 cargo test
 ```
+
+## AI Disclosure
+
+This project was built with the assistance of Claude (Anthropic's AI). Specifically, I used Claude Code (CLI tool) to help with:
+
+- **Architecture planning** — Discussed the module structure, type design, and edge case handling before writing code.
+- **Code generation** — Claude generated the initial implementation of all three modules (`types.rs`, `engine.rs`, `main.rs`), test fixtures, and integration tests.
+- **Test design** — The unit and integration test cases were designed collaboratively, covering edge cases like client ID mismatches, negative balances from disputes, and locked account behavior.
+
+All technical decisions (choice of `rust_decimal` over `f64`, streaming design, dispute state machine, assumptions about locked accounts) were reviewed and understood by me. I can discuss any aspect of the implementation in detail.
