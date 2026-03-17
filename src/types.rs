@@ -1,6 +1,5 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// The type of transaction being processed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -69,12 +68,6 @@ pub struct FormattedDecimal(pub Decimal);
 
 impl Serialize for FormattedDecimal {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{}", self))
-    }
-}
-
-impl fmt::Display for FormattedDecimal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:.4}", self.0)
+        serializer.serialize_str(&format!("{:.4}", self.0))
     }
 }

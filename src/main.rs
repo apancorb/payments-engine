@@ -3,7 +3,7 @@ mod types;
 
 use std::env;
 use std::fs::File;
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader};
 use std::process;
 
 use crate::engine::PaymentsEngine;
@@ -17,45 +17,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let file = File::open(&args[1])?;
-    let reader = BufReader::new(file);
-
     let mut csv_reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
         .flexible(true)
-        .from_reader(reader);
+        .from_reader(BufReader::new(file));
 
     let mut engine = PaymentsEngine::new();
 
     for result in csv_reader.deserialize::<InputRecord>() {
         match result {
             Ok(record) => engine.process(record),
-            Err(e) => {
-                eprintln!("warning: skipping malformed record: {}", e);
-            }
+            Err(e) => eprintln!("warning: skipping malformed record: {}", e),
         }
     }
 
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-
-    writeln!(out, "client,available,held,total,locked")?;
+    let mut csv_writer = csv::Writer::from_writer(io::stdout());
 
     for (&client, account) in engine.accounts() {
-        let record = OutputRecord {
+        csv_writer.serialize(OutputRecord {
             client,
             available: FormattedDecimal(account.available),
             held: FormattedDecimal(account.held),
             total: FormattedDecimal(account.total()),
             locked: account.locked,
-        };
-
-        writeln!(
-            out,
-            "{},{},{},{},{}",
-            record.client, record.available, record.held, record.total, record.locked
-        )?;
+        })?;
     }
 
+    csv_writer.flush()?;
     Ok(())
 }
 
