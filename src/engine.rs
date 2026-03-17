@@ -23,9 +23,7 @@ impl PaymentsEngine {
     pub fn process(&mut self, record: InputRecord) {
         match record.r#type {
             TransactionType::Deposit => self.deposit(record.client, record.tx, record.amount),
-            TransactionType::Withdrawal => {
-                self.withdrawal(record.client, record.tx, record.amount)
-            }
+            TransactionType::Withdrawal => self.withdrawal(record.client, record.tx, record.amount),
             TransactionType::Dispute => self.dispute(record.client, record.tx),
             TransactionType::Resolve => self.resolve(record.client, record.tx),
             TransactionType::Chargeback => self.chargeback(record.client, record.tx),
