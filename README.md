@@ -58,7 +58,7 @@ For server use: `PaymentsEngine::process()` is source-agnostic (takes a single r
 - **Locked accounts** reject new deposits and withdrawals (banking convention)
 - **Client ID mismatch** on dispute/resolve/chargeback → ignored
 - **Duplicate tx IDs** → ignored
-- **Negative available balance** is possible after disputing a partially-withdrawn deposit — this is correct (the client is overdrawn)
+- **Negative available balance** can occur when a deposit is disputed after partial withdrawal — the client spent funds now under dispute, so they're overdrawn
 - **Only deposits are disputable** — withdrawals are not stored in the transaction map
 
 ## Testing
